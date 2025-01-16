@@ -24,6 +24,10 @@ class SignInRequest(BaseModel):
     password: str
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
 def validate_access_token(token=Security(security)):
     try:
         unverified_header = jwt.get_unverified_header(token.credentials)
@@ -67,9 +71,32 @@ async def signin(request: SignInRequest):
         raise HTTPException(status_code=401, detail="User not confirmed.")
 
     return {
-        "id_token": response["AuthenticationResult"]["IdToken"],
         "access_token": response["AuthenticationResult"]["AccessToken"],
         "refresh_token": response["AuthenticationResult"]["RefreshToken"],
+    }
+
+
+@app.post("/refresh")
+async def refresh(
+    refresh_token_request: RefreshTokenRequest, user=Depends(validate_access_token)
+):
+    try:
+        response = cognito_client.initiate_auth(
+            ClientId=settings.COGNITO_CLIENT_ID,
+            AuthFlow="REFRESH_TOKEN_AUTH",
+            AuthParameters={
+                "REFRESH_TOKEN": refresh_token_request.refresh_token,
+                "SECRET_HASH": compute_secret_hash(user["username"]),
+            },
+        )
+    except cognito_client.exceptions.NotAuthorizedException:
+        raise HTTPException(status_code=401, detail="Invalid refresh token.")
+
+    except cognito_client.exceptions.InvalidParameterException:
+        raise HTTPException(status_code=400, detail="Invalid request parameters.")
+
+    return {
+        "access_token": response["AuthenticationResult"]["AccessToken"],
     }
 
 
